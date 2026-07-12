@@ -1,0 +1,8 @@
+apiVersion: 1
+
+providers:
+  - name: Quant Team OS
+    folder: Quant Team OS
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

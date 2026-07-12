@@ -1,0 +1,86 @@
+{
+  "title": "Quant Team OS Required Dashboards",
+  "uid": "qto-required-dashboards",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "timezone": "browser",
+  "tags": ["quant-team-os", "required"],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Agent Runtime Monitoring",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [{"expr": "up{job=\"workers\"}", "legendFormat": "workers", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Temporal Workflow Monitoring",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {"expr": "up{job=\"temporal\"}", "legendFormat": "temporal", "refId": "A"},
+        {"expr": "qto_workflow_runs_total", "legendFormat": "{{status}}", "refId": "B"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "ToolGateway Policy Denials",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "qto_tool_policy_denials_total", "legendFormat": "denials", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "OpenAI API Cost and Error Rate",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {"expr": "qto_openai_cost_usd_total", "legendFormat": "cost_usd", "refId": "A"},
+        {"expr": "qto_openai_errors_total", "legendFormat": "errors", "refId": "B"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Data Ingestion and GX Validation",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 4},
+      "targets": [{"expr": "qto_gx_validations_total", "legendFormat": "{{result}}", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Backtest Runtime and Failure",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 4},
+      "targets": [{"expr": "qto_backtest_failures_total", "legendFormat": "failures", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Connector Health",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 4},
+      "targets": [{"expr": "qto_connection_status", "legendFormat": "{{provider}} {{status}}", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Trading Safety Lock",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 4},
+      "targets": [{"expr": "qto_live_trading_locked", "legendFormat": "live locked", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "LOCKED", "color": "green"}}}]
+        }
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Runtime Logs",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "targets": [{"expr": "{service=~\"api|workers|agent-chat|openbb-backend|control-ui\"}", "refId": "A"}],
+      "options": {"dedupStrategy": "none", "enableLogDetails": true, "showLabels": true, "showTime": true}
+    }
+  ]
+}

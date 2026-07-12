@@ -1,0 +1,30 @@
+{
+  "dashboard_title": "Strategy and Backtest Aggregate",
+  "description": "Starter Superset dashboard spec for Quant Team OS strategy, backtest, factor, and risk aggregate analytics.",
+  "datasource": {
+    "database": "quant_team_os",
+    "schema": "public"
+  },
+  "charts": [
+    {
+      "name": "Strategies by Status",
+      "type": "bar",
+      "query": "select current_status, count(*) as strategy_count from strategy_cards group by current_status order by strategy_count desc"
+    },
+    {
+      "name": "Backtest Runs by Status",
+      "type": "bar",
+      "query": "select status, count(*) as backtest_count from backtest_runs group by status order by backtest_count desc"
+    },
+    {
+      "name": "Risk Review Verdicts",
+      "type": "bar",
+      "query": "select verdict, count(*) as review_count from risk_reviews group by verdict order by review_count desc"
+    },
+    {
+      "name": "Factor Specs by Status",
+      "type": "bar",
+      "query": "select status, count(*) as factor_count from factor_specs group by status order by factor_count desc"
+    }
+  ]
+}

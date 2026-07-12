@@ -1,0 +1,10 @@
+{
+  "expectation_suite_name": "backtest_orders_suite",
+  "expectations": [
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "timestamp"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "symbol"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "quantity"}},
+    {"expectation_type": "expect_negative_quantity_requires_side", "kwargs": {"quantity_column": "quantity", "side_column": "side", "allowed_negative_sides": ["sell", "short"]}},
+    {"expectation_type": "expect_column_values_to_be_in_set", "kwargs": {"column": "side", "value_set": ["buy", "sell", "short", "cover"]}}
+  ]
+}

@@ -1,0 +1,26 @@
+#!/bin/zsh
+set -u
+
+APP_URL="http://127.0.0.1:5173/dashboard"
+API_URL="http://127.0.0.1:8000/healthz"
+CHROME_APP="/Applications/Google Chrome.app"
+STARTER="$(cd "$(dirname "$0")/../Resources" && pwd)/start-quant-team-os.command"
+LOG_DIR="$HOME/Library/Logs/Quant Team OS"
+
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+mkdir -p "$LOG_DIR"
+
+if { ! /usr/bin/curl -fsS --max-time 1 "$APP_URL" >/dev/null 2>&1 || ! /usr/bin/curl -fsS --max-time 1 "$API_URL" >/dev/null 2>&1; } && [ -f "$STARTER" ]; then
+  QTO_START_ONLY=true /usr/bin/nohup "$STARTER" > "$LOG_DIR/launcher.log" 2>&1 &
+fi
+
+for _ in {1..50}; do
+  { /usr/bin/curl -fsS --max-time 1 "$APP_URL" >/dev/null 2>&1 && /usr/bin/curl -fsS --max-time 1 "$API_URL" >/dev/null 2>&1; } && break
+  /bin/sleep 0.4
+done
+
+if [ -d "$CHROME_APP" ]; then
+  /usr/bin/open -a "$CHROME_APP" "$APP_URL"
+else
+  /usr/bin/open -a "Google Chrome" "$APP_URL" >/dev/null 2>&1 || /usr/bin/open "$APP_URL"
+fi

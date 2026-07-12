@@ -1,0 +1,49 @@
+# Ruff configuration for Quant Team OS.
+# Curated rule set: correctness and modernization rules that catch real bugs,
+# while excluding rules that fight the project's intentional patterns
+# (FastAPI dependency-injection defaults, adapter fallback import guards).
+target-version = "py311"
+line-length = 120
+
+extend-exclude = [
+    ".venv",
+    "vendor",
+    "node_modules",
+    "notebooks",
+    "artifacts",
+]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "PIE",  # flake8-pie
+    "PERF", # perflint
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line length is enforced softly by the formatter, not blocking
+    "B008",   # FastAPI resolves Depends()/Query() in argument defaults by design
+    "PERF203", # try/except in loop is acceptable for per-item fault isolation
+    "PERF401", # manual list building is often clearer than comprehension here; advisory only
+    "RUF001", # fullwidth CJK punctuation in Chinese-language strings is intentional
+    "RUF002", # same as RUF001, for docstrings
+    "RUF003", # same as RUF001, for comments
+]
+
+[lint.per-file-ignores]
+# Import-time side effects and sys.path bootstrapping require imports below code.
+"**/conftest.py" = ["E402"]
+"apps/api/app/main.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+# Tests bootstrap sys.path before importing the app package.
+"apps/api/tests/*.py" = ["E402"]
+
+[lint.isort]
+known-first-party = ["app", "data_contracts", "packages"]

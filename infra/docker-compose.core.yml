@@ -1,0 +1,147 @@
+# Quant Team OS core stack (v0.4).
+#
+# The daily-driver subset of infra/docker-compose.yml: state, identity,
+# secrets, workflow, policy, artifacts, experiment tracking, API, workers,
+# and the control UI. Governance guarantees stay intact (Keycloak RBAC,
+# Infisical secret refs, OPA policy, Temporal approvals, MinIO artifacts,
+# ALLOW_*_FALLBACK all false).
+#
+# Deliberately excluded (start them from the full compose file when needed):
+# langfuse, otel-collector, prometheus, postgres-exporter, loki, promtail,
+# grafana, superset, superset-init, jupyterlab, agent-chat, openbb-backend.
+#
+# Usage:
+#   npm run full-stack:core          # this file
+#   npm run full-stack:up           # full stack, infra/docker-compose.yml
+#
+# Each service `extends` the full compose file so images, env, healthchecks,
+# and volumes stay single-sourced. `depends_on: !override` replaces the full
+# stack dependency graph with one trimmed to core services. The API and
+# workers set REQUIRE_LANGFUSE_TRACKING=false so agent traces degrade to the
+# audited local mirror instead of failing when Langfuse is not running.
+
+services:
+  postgres:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+
+  keycloak:
+    extends:
+      file: docker-compose.yml
+      service: keycloak
+
+  infisical:
+    extends:
+      file: docker-compose.yml
+      service: infisical
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  temporal:
+    extends:
+      file: docker-compose.yml
+      service: temporal
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    extends:
+      file: docker-compose.yml
+      service: temporal-ui
+    depends_on: !override
+      temporal:
+        condition: service_healthy
+
+  opa:
+    extends:
+      file: docker-compose.yml
+      service: opa
+
+  minio:
+    extends:
+      file: docker-compose.yml
+      service: minio
+
+  minio-init:
+    extends:
+      file: docker-compose.yml
+      service: minio-init
+    depends_on: !override
+      minio:
+        condition: service_healthy
+
+  mlflow:
+    extends:
+      file: docker-compose.yml
+      service: mlflow
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  api:
+    extends:
+      file: docker-compose.yml
+      service: api
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      REQUIRE_LANGFUSE_TRACKING: "false"
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      infisical:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  workers:
+    extends:
+      file: docker-compose.yml
+      service: workers
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      REQUIRE_LANGFUSE_TRACKING: "false"
+    depends_on: !override
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      infisical:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  control-ui:
+    extends:
+      file: docker-compose.yml
+      service: control-ui
+    depends_on: !override
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  minio_data:

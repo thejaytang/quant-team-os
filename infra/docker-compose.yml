@@ -1,0 +1,546 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: quant_team_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/10-init-qto-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d quant_team_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200\" <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  infisical:
+    image: infisical/infisical:v0.161.8
+    environment:
+      DB_CONNECTION_URI: postgresql://qto_infisical:qto_infisical@postgres:5432/qto_infisical
+      REDIS_URL: redis://redis:6379
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-f13dbc92aaaf86fa7cb0ed8ac3265f47}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-5lrMXKKWCVocS/uerPsl7V+TX/aaUaI7iDkgl3tSmLE=}
+      SITE_URL: http://localhost:8082
+      NODE_ENV: development
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    environment:
+      DB: postgres12
+      SKIP_DB_CREATE: "true"
+      DB_PORT: 5432
+      DBNAME: qto_temporal
+      VISIBILITY_DBNAME: qto_temporal_visibility
+      POSTGRES_USER: qto_temporal
+      POSTGRES_PWD: qto_temporal
+      POSTGRES_SEEDS: postgres
+      PROMETHEUS_ENDPOINT: 0.0.0.0:9091
+    ports:
+      - "7233:7233"
+      - "9091:9091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec '</dev/tcp/temporal/7233'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8233:8080"
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  opa:
+    image: openpolicyagent/opa:1.18.0
+    build:
+      context: ..
+      dockerfile: infra/opa/Dockerfile
+    command: run --server --addr 0.0.0.0:8181 /policies
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done;
+      mc mb --ignore-existing local/qto-artifacts;
+      mc mb --ignore-existing local/qto-datasets;
+      mc mb --ignore-existing local/qto-mlflow;
+      mc mb --ignore-existing local/qto-reports;
+      mc mb --ignore-existing local/qto-dvc;
+      "
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.3
+    build:
+      context: ..
+      dockerfile: infra/mlflow/Dockerfile
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql+psycopg2://qto_mlflow:qto_mlflow@postgres:5432/qto_mlflow --default-artifact-root s3://qto-mlflow
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "${MLFLOW_HOST_PORT:-5000}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  langfuse:
+    image: langfuse/langfuse:2
+    environment:
+      DATABASE_URL: postgresql://qto_langfuse:qto_langfuse@postgres:5432/qto_langfuse
+      NEXTAUTH_SECRET: change-me
+      SALT: change-me
+      NEXTAUTH_URL: http://localhost:3002
+    ports:
+      - "3002:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://langfuse:3000').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    command: ["--config=/etc/otel-collector/config.yml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    volumes:
+      - ./otel-collector/config.yml:/etc/otel-collector/config.yml:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    command: --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/ready | grep -q Ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: postgresql://qto_monitor:qto_monitor@postgres:5432/quant_team_os?sslmode=disable
+    ports:
+      - "9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  loki:
+    image: grafana/loki:3.1.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9080/ready | grep -qi ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      promtail:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  superset:
+    image: apache/superset:4.0.2
+    environment:
+      SUPERSET_SECRET_KEY: quant-team-os-dev-secret
+      SUPERSET_ADMIN_USERNAME: admin
+      SUPERSET_ADMIN_PASSWORD: admin
+      SUPERSET_ADMIN_EMAIL: admin@example.com
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://qto_superset:qto_superset@postgres:5432/qto_superset
+      QTO_ANALYTICS_SQLALCHEMY_URI: postgresql+psycopg2://qto_app:qto_app@postgres:5432/quant_team_os
+    command: superset run -h 0.0.0.0 -p 8088
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset:/app/qto-superset:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  superset-init:
+    image: apache/superset:4.0.2
+    environment:
+      SUPERSET_SECRET_KEY: quant-team-os-dev-secret
+      SUPERSET_ADMIN_USERNAME: admin
+      SUPERSET_ADMIN_PASSWORD: admin
+      SUPERSET_ADMIN_EMAIL: admin@example.com
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://qto_superset:qto_superset@postgres:5432/qto_superset
+      QTO_ANALYTICS_SQLALCHEMY_URI: postgresql+psycopg2://qto_app:qto_app@postgres:5432/quant_team_os
+    command: /bin/sh /app/qto-superset/init.sh
+    volumes:
+      - ./superset:/app/qto-superset:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  jupyterlab:
+    image: quay.io/jupyter/base-notebook:2026-06-24
+    command: start-notebook.py --NotebookApp.token='' --NotebookApp.password=''
+    ports:
+      - "8888:8888"
+    volumes:
+      - ../notebooks:/home/jovyan/work
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/api', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://qto_app:qto_app@postgres:5432/quant_team_os
+      KEYCLOAK_BASE_URL: http://localhost:8080
+      KEYCLOAK_INTERNAL_BASE_URL: http://keycloak:8080
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/quant-team-os/protocol/openid-connect/certs
+      KEYCLOAK_REALM: quant-team-os
+      KEYCLOAK_CLIENT_ID: api
+      KEYCLOAK_CLIENT_SECRET_REF: ${KEYCLOAK_CLIENT_SECRET_REF:-/quant-team-os/dev/keycloak/api-client-secret}
+      OPENBB_KEYCLOAK_CLIENT_SECRET_REF: ${OPENBB_KEYCLOAK_CLIENT_SECRET_REF:-/quant-team-os/dev/keycloak/openbb-backend-client-secret}
+      OPENBB_INTERNAL_TOKEN: ${OPENBB_INTERNAL_TOKEN:-change-me-openbb-internal-token}
+      OPA_URL: http://opa:8181
+      ALLOW_LOCAL_POLICY_FALLBACK: "false"
+      INFISICAL_API_URL: http://infisical:8080
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_MACHINE_IDENTITY_CLIENT_ID: ${INFISICAL_MACHINE_IDENTITY_CLIENT_ID:-}
+      INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET:-}
+      ALLOW_LOCAL_SECRET_FALLBACK: "false"
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      ALLOW_TEMPORAL_FALLBACK: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET_ARTIFACTS: qto-artifacts
+      S3_BUCKET_DATASETS: qto-datasets
+      S3_BUCKET_MLFLOW: qto-mlflow
+      S3_BUCKET_REPORTS: qto-reports
+      S3_BUCKET_DVC: qto-dvc
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      ENABLE_MINIO_UPLOAD: "true"
+      OPENAI_API_KEY_REF: ${OPENAI_API_KEY_REF:-/quant-team-os/dev/connections/openai}
+      ALLOW_AGENT_FALLBACK: "false"
+      ALLOW_MATURE_TOOL_FALLBACK: "false"
+      MASSIVE_API_KEY_REF: ${MASSIVE_API_KEY_REF:-/quant-team-os/dev/connections/massive}
+      QUANTCONNECT_API_TOKEN_REF: ${QUANTCONNECT_API_TOKEN_REF:-/quant-team-os/dev/connections/quantconnect}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_UI_URL: ${MLFLOW_UI_URL:-http://localhost:5000}
+      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-quant-team-os}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      LANGFUSE_HOST: http://langfuse:3000
+      LANGFUSE_UI_URL: http://localhost:3002
+      LANGFUSE_PUBLIC_KEY_REF: ${LANGFUSE_PUBLIC_KEY_REF:-/quant-team-os/dev/langfuse/public-key}
+      LANGFUSE_SECRET_KEY_REF: ${LANGFUSE_SECRET_KEY_REF:-/quant-team-os/dev/langfuse/secret-key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: quant-team-os-api
+      INFISICAL_UI_URL: http://localhost:8082
+      OPENBB_WORKSPACE_URL: https://pro.openbb.co
+      ALLOW_LIVE_TRADING: "false"
+      ALLOW_AGENT_ARBITRARY_CODE_EXECUTION: "false"
+      ALLOW_LOCAL_AUTH_FALLBACK: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      infisical:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  workers:
+    build:
+      context: ..
+      dockerfile: apps/workers/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://qto_app:qto_app@postgres:5432/quant_team_os
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      ALLOW_TEMPORAL_FALLBACK: "false"
+      OPA_URL: http://opa:8181
+      ALLOW_LOCAL_POLICY_FALLBACK: "false"
+      INFISICAL_API_URL: http://infisical:8080
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_MACHINE_IDENTITY_CLIENT_ID: ${INFISICAL_MACHINE_IDENTITY_CLIENT_ID:-}
+      INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET:-}
+      ALLOW_LOCAL_SECRET_FALLBACK: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET_ARTIFACTS: qto-artifacts
+      S3_BUCKET_DATASETS: qto-datasets
+      S3_BUCKET_MLFLOW: qto-mlflow
+      S3_BUCKET_REPORTS: qto-reports
+      S3_BUCKET_DVC: qto-dvc
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      ENABLE_MINIO_UPLOAD: "true"
+      ALLOW_AGENT_FALLBACK: "false"
+      ALLOW_MATURE_TOOL_FALLBACK: "false"
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-quant-team-os}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      LANGFUSE_HOST: http://langfuse:3000
+      LANGFUSE_PUBLIC_KEY_REF: ${LANGFUSE_PUBLIC_KEY_REF:-/quant-team-os/dev/langfuse/public-key}
+      LANGFUSE_SECRET_KEY_REF: ${LANGFUSE_SECRET_KEY_REF:-/quant-team-os/dev/langfuse/secret-key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: quant-team-os-workers
+      WORKER_METRICS_PORT: "9002"
+    ports:
+      - "9002:9002"
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      infisical:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9002/metrics', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  control-ui:
+    image: node:22-slim
+    working_dir: /app/apps/control-ui
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_KEYCLOAK_BASE_URL: http://localhost:8080
+      VITE_KEYCLOAK_REALM: quant-team-os
+      VITE_KEYCLOAK_CLIENT_ID: control-ui
+      VITE_OPENBB_WORKSPACE_URL: https://pro.openbb.co
+      VITE_OPENBB_BACKEND_URL: http://localhost:8010
+    ports:
+      - "5173:5173"
+    volumes:
+      - ..:/app
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  agent-chat:
+    build:
+      context: ..
+      dockerfile: apps/agent-chat/Dockerfile
+    environment:
+      QTO_API_URL: http://api:8000
+      CHAINLIT_URL: http://localhost:8001
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET:-change-me-chainlit-auth-secret}
+      OAUTH_GENERIC_NAME: keycloak
+      OAUTH_GENERIC_CLIENT_ID: chainlit
+      OAUTH_GENERIC_CLIENT_SECRET: ${OAUTH_GENERIC_CLIENT_SECRET:-chainlit-local-secret}
+      OAUTH_GENERIC_AUTH_URL: http://localhost:8080/realms/quant-team-os/protocol/openid-connect/auth
+      OAUTH_GENERIC_TOKEN_URL: http://keycloak:8080/realms/quant-team-os/protocol/openid-connect/token
+      OAUTH_GENERIC_USER_INFO_URL: http://keycloak:8080/realms/quant-team-os/protocol/openid-connect/userinfo
+      OAUTH_GENERIC_SCOPES: openid profile email
+    ports:
+      - "8001:8001"
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  openbb-backend:
+    build:
+      context: ..
+      dockerfile: apps/openbb-backend/Dockerfile
+    environment:
+      API_BASE_URL: http://api:8000
+      OPENBB_INTERNAL_TOKEN: ${OPENBB_INTERNAL_TOKEN:-change-me-openbb-internal-token}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: quant-team-os-openbb-backend
+    ports:
+      - "8010:8010"
+    depends_on:
+      api:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres_data:
+  minio_data:

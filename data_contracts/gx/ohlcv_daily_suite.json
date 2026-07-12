@@ -1,0 +1,20 @@
+{
+  "expectation_suite_name": "ohlcv_daily_suite",
+  "expectations": [
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "symbol"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "date"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "open"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "high"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "low"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "close"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "volume"}},
+    {"expectation_type": "expect_column_pair_values_A_to_be_greater_than_B", "kwargs": {"column_A": "high", "column_B": "low", "or_equal": true}},
+    {"expectation_type": "expect_column_pair_values_A_to_be_greater_than_B", "kwargs": {"column_A": "high", "column_B": "open", "or_equal": true}},
+    {"expectation_type": "expect_column_pair_values_A_to_be_greater_than_B", "kwargs": {"column_A": "high", "column_B": "close", "or_equal": true}},
+    {"expectation_type": "expect_column_pair_values_A_to_be_greater_than_B", "kwargs": {"column_A": "open", "column_B": "low", "or_equal": true}},
+    {"expectation_type": "expect_column_pair_values_A_to_be_greater_than_B", "kwargs": {"column_A": "close", "column_B": "low", "or_equal": true}},
+    {"expectation_type": "expect_column_values_to_be_between", "kwargs": {"column": "volume", "min_value": 0}},
+    {"expectation_type": "expect_compound_columns_to_be_unique", "kwargs": {"column_list": ["symbol", "date"]}},
+    {"expectation_type": "expect_column_values_to_be_strictly_increasing_within_group", "kwargs": {"group_column": "symbol", "sort_column": "date"}}
+  ]
+}

@@ -1,0 +1,6 @@
+fastapi>=0.115
+httpx>=0.27
+opentelemetry-api>=1.26
+opentelemetry-sdk>=1.26
+opentelemetry-exporter-otlp>=1.26
+uvicorn[standard]>=0.30

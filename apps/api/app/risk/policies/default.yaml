@@ -1,0 +1,39 @@
+research_requirements:
+  min_backtest_years: 3
+  require_out_of_sample: true
+  require_transaction_costs: true
+  require_slippage_model: true
+  require_factor_report: true
+
+performance_thresholds:
+  min_sharpe: 0.8
+  max_drawdown: 0.25
+  max_turnover_daily: 0.50
+  min_trade_count: 50
+
+portfolio_limits:
+  max_single_position_weight: 0.05
+  max_sector_weight: 0.25
+  max_leverage: 1.0
+
+paper_trading:
+  requires_human_approval: true
+  max_notional_usd: 10000
+
+live_trading:
+  enabled: false
+  requires_human_approval: true
+  requires_two_step_unlock: true
+  max_notional_usd: 0
+
+execution:
+  allow_market_orders: false
+  require_limit_orders: true
+  max_order_notional_usd: 1000
+
+kill_switch:
+  enabled: true
+  trigger_daily_loss_pct: 0.02
+  trigger_weekly_loss_pct: 0.05
+  trigger_connection_error_count: 3
+

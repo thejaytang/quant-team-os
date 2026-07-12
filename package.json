@@ -1,0 +1,29 @@
+{
+  "name": "quant-team-os",
+  "version": "0.4.0",
+  "private": true,
+  "workspaces": [
+    "apps/control-ui",
+    "packages/shared"
+  ],
+  "overrides": {
+    "path-to-regexp": "8.4.2"
+  },
+  "scripts": {
+    "test": "python3 scripts/release_gate.py && python3 scripts/acceptance_audit.py && python3 scripts/opa_policy_gate.py && QTO_SETTINGS_ENV_FILE= python3 -m pytest apps/api/tests && npm --prefix apps/control-ui run test && npm --prefix apps/control-ui run build",
+    "lint": "ruff check .",
+    "lint:fix": "ruff check . --fix",
+    "acceptance:audit": "python3 scripts/acceptance_audit.py",
+    "control-ui:dev": "npm --workspace @quant-team-os/control-ui run dev",
+    "control-ui:build": "npm --workspace @quant-team-os/control-ui run build",
+    "api:dev": "uvicorn app.main:app --app-dir apps/api --reload --host 0.0.0.0 --port 8000",
+    "full-stack:core": "docker compose --env-file .env -f infra/docker-compose.core.yml up -d --build",
+    "full-stack:core:down": "docker compose --env-file .env -f infra/docker-compose.core.yml down",
+    "full-stack:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --build",
+    "full-stack:doctor:core": "python3 scripts/core_stack_doctor.py --env .env",
+    "full-stack:doctor": "python3 scripts/full_stack_doctor.py --env .env",
+    "full-stack:doctor:template": "python3 scripts/full_stack_doctor.py --env .env.example --template-ok",
+    "full-stack:doctor:live": "python3 scripts/full_stack_doctor.py --env .env --live",
+    "clone:tools": "sh scripts/clone_tools.sh"
+  }
+}
