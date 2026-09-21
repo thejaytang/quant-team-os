@@ -40,7 +40,7 @@ flowchart TD
 
 ## 4. Requirements and current limits
 
-Integration platform under development. External providers and credentials need separate configuration. Live trading remains locked by default. This presentation update does not start the stack, verify broker connectivity or establish investment performance. Related repositories have different scopes; their names and dates do not establish a replacement order.
+Integration platform under development. External providers and credentials need separate configuration. Live trading remains locked by default. The CI run triggered by this update cannot resolve `pyqlib` under Python 3.13; see the [check results](https://github.com/thejaytang/quant-team-os/actions/runs/35663543220). The preceding commit also had failing CI. This presentation update does not start the stack, verify broker connectivity or establish investment performance. Related repositories have different scopes; their names and dates do not establish a replacement order.
 
 ## 5. Documentation and sources
 
